@@ -1,0 +1,9 @@
+Copyright (c) 2026 Jaron Reis / Dos Reis Kings Properties. All rights reserved.
+
+Source code and assets are visible for community review, testing, and contribution. 
+Unauthorized commercial distribution, packaging, or resale of this software or its 
+underlying assets is strictly prohibited. 
+
+By submitting a Pull Request to this repository, contributors agree to grant the 
+project owner a perpetual, irrevocable, worldwide, royalty-free license to use, 
+modify, and commercially distribute the contributed code as part of Tow Tycoon.
