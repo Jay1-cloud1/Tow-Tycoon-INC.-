@@ -3,6 +3,7 @@
 #include "Engine.h"
 #include "DeterministicRng.h"
 #include "SaveStore.h"
+#include "Version.h"
 #include "simulation/JobGeneration.h"
 #include "simulation/RoadsideJobs.h"
 #include "simulation/RoadPathfinder.h"
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iomanip>
+#include <system_error>
 #include <limits>
 #include <queue>
 #include <random>
@@ -73,13 +75,22 @@ public:
     void handleEvent(Engine& e, SDL_Event& ev) override;
     void render(Engine& e) override;
 private:
-    struct Button { SDL_Rect rect; const char* label; };
-    std::array<Button,3> buildButtons(Engine& e) const;
+    enum ButtonId { B_CONTINUE, B_NEW, B_SETTINGS, B_QUIT };
+    struct Button { SDL_Rect rect; const char* label; ButtonId id; };
+    std::array<Button,4> buildButtons(Engine& e) const;
+    bool hasSave(Engine& e) const;
+    void activate(Engine& e, ButtonId id);
+    void startGame(Engine& e, bool fresh);
+    bool showSettings=false;
+    bool confirmNew=false;
 };
-inline std::array<MenuState::Button,3> MenuState::buildButtons(Engine& e) const {
-    const int bw=320,bh=68,sp=22,sx=(e.logicalW()-bw)/2;
-    const int sy=std::max(80,e.logicalH()-348);
-    return {{ {SDL_Rect{sx,sy,bw,bh},"Start"},{SDL_Rect{sx,sy+(bh+sp),bw,bh},"Settings"},{SDL_Rect{sx,sy+2*(bh+sp),bw,bh},"Quit"} }};
+inline std::array<MenuState::Button,4> MenuState::buildButtons(Engine& e) const {
+    const int bw=320,bh=58,sp=14,sx=(e.logicalW()-bw)/2;
+    const int sy=std::max(80,e.logicalH()-360);
+    return {{ {SDL_Rect{sx,sy,bw,bh},"Continue",B_CONTINUE},
+              {SDL_Rect{sx,sy+(bh+sp),bw,bh},confirmNew?"Confirm New Game":"New Game",B_NEW},
+              {SDL_Rect{sx,sy+2*(bh+sp),bw,bh},"Settings",B_SETTINGS},
+              {SDL_Rect{sx,sy+3*(bh+sp),bw,bh},"Quit",B_QUIT} }};
 }
 
 // ----------------------------- shared catalog ------------------------------
@@ -135,6 +146,8 @@ public:
     void handleEvent(Engine& e, SDL_Event& ev) override;
     void update(Engine& e, float dt) override;
     void render(Engine& e) override;
+    // Skip loading the existing save; the next save overwrites it.
+    void startFresh(){ loadedOnce=true; }
 #ifdef TT_HARNESS
     void seedTest(){ marketplaceUnlocked=true; tows=6; cash=60000; ownedTrucks={0,3}; drivenSlot=0; drivers=1;
         for(size_t i=0;i<lots.size();++i) lots[i].owner = (i%3==0)?0 : (i%3==1)?1 : -1; }
@@ -283,15 +296,46 @@ private:
 };
 
 // ------------------------------ MenuState impl ------------------------------
+inline bool MenuState::hasSave(Engine& e) const {
+    std::error_code ec;
+    return std::filesystem::exists(std::filesystem::path(e.saveDir())/"savegame.tt",ec)
+        || std::filesystem::exists(std::filesystem::path(e.baseDir())/"savegame.tt",ec);
+}
+inline void MenuState::startGame(Engine& e, bool fresh){
+    auto world=std::make_unique<WorldState>();
+    if(fresh) world->startFresh();
+    e.changeState(std::move(world));
+}
+inline void MenuState::activate(Engine& e, ButtonId id){
+    if(id!=B_NEW) confirmNew=false;
+    switch(id){
+        case B_CONTINUE: if(hasSave(e)) startGame(e,false); return;
+        case B_NEW:
+            // Starting over replaces the existing save, so ask once before doing it.
+            if(hasSave(e) && !confirmNew){ confirmNew=true; return; }
+            startGame(e,true); return;
+        case B_SETTINGS: showSettings=true; return;
+        case B_QUIT: e.requestQuit(); return;
+    }
+}
 inline void MenuState::handleEvent(Engine& e, SDL_Event& ev){
-    if (ev.type==SDL_KEYDOWN){
-        if (ev.key.keysym.sym==SDLK_RETURN||ev.key.keysym.sym==SDLK_KP_ENTER){ e.changeState(std::make_unique<WorldState>()); return; }
-        if (ev.key.keysym.sym==SDLK_ESCAPE){ e.requestQuit(); return; } }
+    if (showSettings){
+        if (ev.type==SDL_KEYDOWN){ const SDL_Keycode k=ev.key.keysym.sym;
+            if (k==SDLK_f||k==SDLK_F11) e.toggleFullscreen();
+            else if (k==SDLK_ESCAPE||k==SDLK_s||k==SDLK_RETURN||k==SDLK_KP_ENTER) showSettings=false; }
+        if (ev.type==SDL_MOUSEBUTTONDOWN && ev.button.button==SDL_BUTTON_LEFT) showSettings=false;
+        return;
+    }
+    if (ev.type==SDL_KEYDOWN){ const SDL_Keycode k=ev.key.keysym.sym;
+        if (k==SDLK_RETURN||k==SDLK_KP_ENTER){ if(confirmNew) activate(e,B_NEW); else if(hasSave(e)) activate(e,B_CONTINUE); else activate(e,B_NEW); return; }
+        if (k==SDLK_n){ activate(e,B_NEW); return; }
+        if (k==SDLK_s){ activate(e,B_SETTINGS); return; }
+        if (k==SDLK_F11){ e.toggleFullscreen(); return; }
+        if (k==SDLK_ESCAPE){ if(confirmNew) confirmNew=false; else e.requestQuit(); return; } }
     if (ev.type==SDL_MOUSEBUTTONDOWN && ev.button.button==SDL_BUTTON_LEFT){
-        auto bs=buildButtons(e); int mx=e.logicalMouseX(),my=e.logicalMouseY();
-        for (size_t i=0;i<bs.size();++i){ auto&b=bs[i];
-            if (mx>=b.rect.x&&mx<=b.rect.x+b.rect.w&&my>=b.rect.y&&my<=b.rect.y+b.rect.h){
-                if(i==0)e.changeState(std::make_unique<WorldState>()); else if(i==2)e.requestQuit(); } } }
+        int mx=e.logicalMouseX(),my=e.logicalMouseY();
+        for (const auto& b:buildButtons(e))
+            if (mx>=b.rect.x&&mx<=b.rect.x+b.rect.w&&my>=b.rect.y&&my<=b.rect.y+b.rect.h){ activate(e,b.id); return; } }
 }
 inline void MenuState::render(Engine& e){
     if (e.menuBg){ SDL_Rect d{0,0,e.logicalW(),e.logicalH()}; SDL_RenderCopy(e.renderer(),e.menuBg,nullptr,&d); fillRect(e,0,0,e.logicalW(),e.logicalH(),12,14,26,120); }
@@ -300,13 +344,34 @@ inline void MenuState::render(Engine& e){
     auto bs=buildButtons(e);
     if (e.menuLogo&&e.menuLogoW>0){ int dh=std::min(300,std::max(80,bs[0].rect.y-48)); int dw=(int)std::round((double)dh*e.menuLogoW/e.menuLogoH); SDL_Rect d{cx-dw/2,28,dw,dh}; SDL_RenderCopy(e.renderer(),e.menuLogo,nullptr,&d); }
     else drawText(e,"TOW TRUCK TYCOON",cx,120,SDL_Color{235,200,90,255},48,true);
+    const bool saveExists=hasSave(e);
     int mx=e.logicalMouseX(),my=e.logicalMouseY();
-    for (auto&b:bs){ bool h=(mx>=b.rect.x&&mx<=b.rect.x+b.rect.w&&my>=b.rect.y&&my<=b.rect.y+b.rect.h);
-        fillRect(e,b.rect.x,b.rect.y,b.rect.w,b.rect.h,h?58:34,h?150:108,h?232:184,255);
+    for (auto&b:bs){ const bool enabled=(b.id!=B_CONTINUE||saveExists);
+        bool h=!showSettings&&enabled&&(mx>=b.rect.x&&mx<=b.rect.x+b.rect.w&&my>=b.rect.y&&my<=b.rect.y+b.rect.h);
+        const bool warn=(b.id==B_NEW&&confirmNew);
+        if(!enabled) fillRect(e,b.rect.x,b.rect.y,b.rect.w,b.rect.h,52,58,72,255);
+        else if(warn) fillRect(e,b.rect.x,b.rect.y,b.rect.w,b.rect.h,h?214:184,h?84:64,h?64:48,255);
+        else fillRect(e,b.rect.x,b.rect.y,b.rect.w,b.rect.h,h?58:34,h?150:108,h?232:184,255);
         fillRect(e,b.rect.x,b.rect.y,b.rect.w,4,255,255,255,h?70:40); fillRect(e,b.rect.x,b.rect.y+b.rect.h-4,b.rect.w,4,0,0,0,60);
         strokeRect(e,b.rect.x,b.rect.y,b.rect.w,b.rect.h,12,20,34,255); if(h)strokeRect(e,b.rect.x-2,b.rect.y-2,b.rect.w+4,b.rect.h+4,235,200,90,255);
-        drawText(e,b.label,b.rect.x+b.rect.w/2,b.rect.y+(b.rect.h-30)/2,SDL_Color{245,245,245,255},30,true); }
-    drawText(e,"Enter / Start to play  -  Esc to quit",cx,e.logicalH()-40,SDL_Color{190,198,214,255},18,true);
+        drawText(e,b.label,b.rect.x+b.rect.w/2,b.rect.y+(b.rect.h-28)/2,enabled?SDL_Color{245,245,245,255}:SDL_Color{140,146,160,255},26,true); }
+    const char* hint=confirmNew?"Your current save will be replaced  -  Enter or click again to confirm, Esc to cancel"
+        :"Enter to play   N new game   S settings   Esc quit";
+    drawText(e,hint,cx,e.logicalH()-40,confirmNew?SDL_Color{240,190,150,255}:SDL_Color{190,198,214,255},18,true);
+    drawText(e,"v" TOWTYCOON_VERSION,e.logicalW()-70,e.logicalH()-30,SDL_Color{150,158,176,255},16);
+    if (showSettings){
+        fillRect(e,0,0,e.logicalW(),e.logicalH(),0,0,0,150);
+        const int pw=560,ph=300,x=(e.logicalW()-pw)/2,y=(e.logicalH()-ph)/2;
+        fillRect(e,x,y,pw,ph,18,20,30,248); strokeRect(e,x,y,pw,ph,235,200,90,255);
+        drawText(e,"SETTINGS",cx,y+16,SDL_Color{235,200,90,255},28,true);
+        fillRect(e,x+34,y+72,pw-68,34,28,32,44,255); strokeRect(e,x+34,y+72,pw-68,34,90,110,140,255);
+        drawText(e,"[F]  Fullscreen",x+50,y+79,SDL_Color{230,232,240,255},19);
+        drawText(e,e.isFullscreen()?"On":"Off",x+pw-120,y+79,e.isFullscreen()?SDL_Color{150,230,160,255}:SDL_Color{200,160,120,255},19);
+        drawText(e,"Difficulty, weather, hints and autosave are saved",cx,y+130,SDL_Color{200,210,235,255},17,true);
+        drawText(e,"with each game: press G while playing to change them.",cx,y+154,SDL_Color{200,210,235,255},17,true);
+        drawText(e,"F11 toggles fullscreen anywhere on this menu.",cx,y+190,SDL_Color{170,180,200,255},16,true);
+        drawText(e,"F to toggle   -   Esc / click to close",cx,y+ph-34,SDL_Color{190,200,220,255},17,true);
+    }
 }
 
 // ------------------------------ WorldState impl -----------------------------
@@ -1080,7 +1145,7 @@ inline void WorldState::drawPanels(Engine& e){
             std::ostringstream rp; rp<<"$"<<wk<<"/wk x "<<lc[i].weeks<<"wk"; drawText(e,rp.str().c_str(),x+pw-250,ry+4,SDL_Color{200,210,230,255},17); }
         drawText(e,"Press 1-3 to borrow    -    F/Esc to close",W/2,y+ph-20,SDL_Color{190,200,220,255},17,true);
     } else if(panel==P_STOCK){
-        int pw=820,ph=440,x=(W-pw)/2,y=80; fillRect(e,x,y,pw,ph,18,20,30,245); strokeRect(e,x,y,pw,ph,235,200,90,255);
+        int pw=820,ph=480,x=(W-pw)/2,y=std::max(8,std::min(70,(e.logicalH()-ph)/2)); fillRect(e,x,y,pw,ph,18,20,30,245); strokeRect(e,x,y,pw,ph,235,200,90,255);
         drawIcon(e,tt::IC_CHART,x+54,y+42,48);
         drawText(e,"STOCK MARKET",W/2,y+14,SDL_Color{235,200,90,255},28,true);
         long val=computeValuation(); long rv=rivalValuation();
