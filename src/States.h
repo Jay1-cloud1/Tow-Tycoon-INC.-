@@ -1071,7 +1071,7 @@ inline void WorldState::drawPanels(Engine& e){
             std::ostringstream pr; pr<<"$"<<cat[i].price; drawText(e,pr.str().c_str(),x+pw-150,ry+9,afford?SDL_Color{150,230,150,255}:SDL_Color{220,120,120,255},19); }
         drawText(e,"Up/Down or 1-6  -  Enter to BUY  -  B/Esc back",W/2,y+ph-28,SDL_Color{190,200,220,255},18,true);
     } else if(panel==P_FLEET){
-        int pw=820,ph=500,x=(W-pw)/2,y=70; fillRect(e,x,y,pw,ph,18,20,30,245); strokeRect(e,x,y,pw,ph,235,200,90,255);
+        int pw=820,ph=440,x=(W-pw)/2,y=80; fillRect(e,x,y,pw,ph,18,20,30,245); strokeRect(e,x,y,pw,ph,235,200,90,255);
         drawText(e,"FLEET & OPERATIONS",W/2,y+12,SDL_Color{235,200,90,255},28,true);
         std::ostringstream w; w<<"Cash: $"<<cash<<"    Drivers: "<<drivers
             <<"    AI dispatch: "<<(autoT.active?"working calls":"needs a driver and spare truck");
@@ -1145,7 +1145,7 @@ inline void WorldState::drawPanels(Engine& e){
             std::ostringstream rp; rp<<"$"<<wk<<"/wk x "<<lc[i].weeks<<"wk"; drawText(e,rp.str().c_str(),x+pw-250,ry+4,SDL_Color{200,210,230,255},17); }
         drawText(e,"Press 1-3 to borrow    -    F/Esc to close",W/2,y+ph-20,SDL_Color{190,200,220,255},17,true);
     } else if(panel==P_STOCK){
-        int pw=820,ph=500,x=(W-pw)/2,y=70; fillRect(e,x,y,pw,ph,18,20,30,245); strokeRect(e,x,y,pw,ph,235,200,90,255);
+        int pw=820,ph=480,x=(W-pw)/2,y=std::max(8,std::min(70,(e.logicalH()-ph)/2)); fillRect(e,x,y,pw,ph,18,20,30,245); strokeRect(e,x,y,pw,ph,235,200,90,255);
         drawIcon(e,tt::IC_CHART,x+54,y+42,48);
         drawText(e,"STOCK MARKET",W/2,y+14,SDL_Color{235,200,90,255},28,true);
         long val=computeValuation(); long rv=rivalValuation();
