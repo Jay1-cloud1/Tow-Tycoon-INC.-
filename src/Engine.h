@@ -23,6 +23,8 @@ public:
     void changeState(std::unique_ptr<GameState> next);
     void logInfo(const std::string& msg);
     void requestQuit();
+    void toggleFullscreen();
+    bool isFullscreen() const;
 
     SDL_Renderer* renderer() { return m_renderer; }
     int screenW() const { return m_width; }

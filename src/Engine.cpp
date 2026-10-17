@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include "Version.h"
 #include "GameState.h"
 #include "UiViewport.h"
 #include <algorithm>
@@ -33,7 +34,7 @@ bool Engine::init(const std::string& title, int w, int h) {
         m_log.open(m_basePath + "towtycoon.log", std::ios::out | std::ios::trunc);
     }
 
-    logMessage("Startup");
+    logMessage(std::string("Startup TowTycoon v") + TOWTYCOON_VERSION);
     logMessage(std::string("CWD: ") + (cwd.empty() ? "<unknown>" : cwd));
     logMessage(std::string("EXE DIR: ") + (m_basePath.empty() ? "<unknown>" : m_basePath));
     if (!m_basePath.empty()) {
@@ -303,6 +304,19 @@ void Engine::logError(const std::string& context, const std::string& detail) {
 
 void Engine::logInfo(const std::string& msg) {
     logMessage(msg);
+}
+
+void Engine::toggleFullscreen() {
+    if (!m_window) return;
+    const Uint32 flags = isFullscreen() ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP;
+    if (SDL_SetWindowFullscreen(m_window, flags) != 0)
+        logError("SDL_SetWindowFullscreen failed", SDL_GetError());
+    else
+        logMessage(flags ? "Fullscreen on" : "Fullscreen off");
+}
+
+bool Engine::isFullscreen() const {
+    return m_window && (SDL_GetWindowFlags(m_window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
 }
 
 void Engine::requestQuit() {

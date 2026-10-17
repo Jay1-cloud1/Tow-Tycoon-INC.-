@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TowTycoon CXX)
+project(TowTycoon VERSION 0.1.0 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -20,6 +20,7 @@ add_executable(TowTycoon
   src/SaveStore.cpp
   ${APP_RESOURCES}
 )
+target_compile_definitions(TowTycoon PRIVATE TOWTYCOON_VERSION="${PROJECT_VERSION}")
 
 if(WIN32)
   set_source_files_properties("${APP_RESOURCES}" PROPERTIES
