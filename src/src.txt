@@ -1,0 +1,14 @@
+#include "Engine.h"
+#include "States.h"
+#include <memory>
+
+int main(int, char**) {
+  Engine eng;
+  if (!eng.init("TowTycoon (Prototype)", 1280, 720)) return 1;
+
+  eng.changeState(std::make_unique<MenuState>());
+  eng.run();
+
+  eng.shutdown();
+  return 0;
+}

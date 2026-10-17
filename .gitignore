@@ -1,0 +1,8 @@
+# Build output (compiled game, DLLs, CMake cache, local saves and logs)
+build/
+*.exe
+*.dll
+*.obj
+*.o
+savegame.tt
+*.log
