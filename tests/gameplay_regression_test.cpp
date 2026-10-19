@@ -160,8 +160,47 @@ struct WorldRegression {
         WorldState upgraded;require(upgraded.loadGame(e,&error),error.c_str());
         require(upgraded.cash==4242&&upgraded.ownedTrucks.size()==2&&upgraded.loans.size()==1&&upgraded.loans[0].balance==2500,"legacy finances and fleet retained");
         require(upgraded.positiveMonths==0&&!upgraded.monthPositive&&upgraded.jobs.size()==3,"legacy history starts without inventing qualification");
-        auto current=snapshot(upgraded,e);require(current[0]=='7',"legacy save upgrades to v7");
+        auto current=snapshot(upgraded,e);require(current[0]=='8',"legacy save upgrades to v8");
         std::string backup;require(SaveStore::readAll(std::filesystem::path(e.saveDir())/"savegame.tt.bak",backup,error)&&backup==text,"original v6 retained in backup");
+    }
+    static void legacyLotMismatch(Engine& e){
+        // Saves from the smaller pre-0.1.1 city hold fewer lots than the regenerated map; they must still load.
+        WorldState city;persistence::SaveGameData data;data.cash=3100;data.ownedTrucks={0};
+        for(int i=0;i<10;++i)data.lots.push_back({i<2?0:-1,1.5f});
+        std::string text,error;require(persistence::encodeSaveGame(data,80,60,16,text,error),"encode short-lot fixture");
+        require(text[0]=='7',"fixture without a map stays v7");
+        require(SaveStore::writeAtomically(std::filesystem::path(e.saveDir())/"savegame.tt",text,error),"write short-lot fixture");
+        WorldState upgraded;require(upgraded.loadGame(e,&error),error.c_str());
+        require(upgraded.cash==3100&&upgraded.lots.size()==city.lots.size(),"mismatched legacy lots load with the current city");
+        require(upgraded.lots[0].owner==0&&upgraded.lots[1].owner==0&&upgraded.lots[2].owner==-1,"shared lots keep their owner");
+    }
+    static void councilPersistence(Engine& e){
+        WorldState w;w.loadedOnce=true;w.optAutosave=false;w.cash=20000;
+        w.panel=WorldState::P_TOWNS;w.townSel=2;
+        const std::size_t lotsBefore=w.lots.size(),buildingsBefore=w.buildings.size();
+        key(w,e,SDLK_b);require(w.lots.size()==lotsBefore+1&&w.buildings.size()==buildingsBefore+1,"funding adds a building and lot");
+        key(w,e,SDLK_r);key(w,e,SDLK_r);key(w,e,SDLK_x);require(w.cities[2].exclusiveContract,"contract bought");
+        w.panel=WorldState::P_NONE;w.devFoundTown(30,170,"Saved Town");
+        w.tiles[simulation::tileIndex(3,3,w.mapW)]=tt::WATER;w.lots.back().owner=0;
+        const auto saved=snapshot(w,e);require(saved[0]=='8',"saves are v8");
+        WorldState restored;std::string error;require(restored.loadGame(e,&error),error.c_str());
+        require(restored.lots.size()==w.lots.size()&&restored.lots.back().owner==0,"funded lot survives reload");
+        require(restored.buildings.size()==w.buildings.size(),"funded building survives reload");
+        require(restored.cities.size()==w.cities.size()&&restored.cities.back().name=="Saved Town","founded town survives reload");
+        require(restored.cities[2].exclusiveContract&&restored.cities[2].councilRating==w.cities[2].councilRating
+                &&restored.cities[2].population==w.cities[2].population,"council progress survives reload");
+        require(restored.tiles[simulation::tileIndex(3,3,restored.mapW)]==tt::WATER,"edited tiles survive reload");
+        require(snapshot(restored,e)==saved,"v8 save-load-save is lossless");
+
+        // A tow picked up in another town is credited to that town, not the yard's.
+        restored.jobs.clear();const auto& town=restored.cities[2];
+        const float jx=(town.cx+0.5f)*restored.tile,jy=(town.cy+0.5f)*restored.tile;
+        restored.jobs.push_back({jx,jy,200,true,0,0,0,0,0,"remote tow"});restored.truckX=jx;restored.truckY=jy;
+        key(restored,e,SDLK_e);require(restored.carried.size()==1&&restored.carried[0].city==2,"cargo remembers pickup town");
+        const int yardTows=restored.cities[0].towsCompleted,remoteTows=restored.cities[2].towsCompleted,cash=restored.cash;
+        restored.truckX=restored.yardX;restored.truckY=restored.yardY;key(restored,e,SDLK_e);
+        require(restored.cities[2].towsCompleted==remoteTows+1&&restored.cities[0].towsCompleted==yardTows,"delivery credits pickup town");
+        require(restored.cash==cash+250,"pickup town's exclusive contract pays its bonus");
     }
     static void resume(Engine& e){
         WorldState w;w.loadedOnce=true;w.optAutosave=false;w.ownedTrucks={0,0,0};w.drivers=2;w.cash=10000;
@@ -241,7 +280,7 @@ struct WorldRegression {
         e.trucksTex=e.loadTexture("trucks.png");e.carsTex=e.loadTexture("cars.png");e.buildingsTex=e.loadTexture("buildings.png");
         e.rivalTrucksTex=e.loadTexture("rival_trucks.png");e.lotTex=e.loadTexture("lot_marker.png",&e.lotW,&e.lotH);e.iconsTex=e.loadTexture("icons.png");
         e.openttdGuiTex=e.loadTexture("openttd/gui04.png");
-        credit(e);fleet(e);bounds(e);tow(e);v011Features(e);legacy(e);resume(e);protection(e,root);menuAndScreens(e);
+        credit(e);fleet(e);bounds(e);tow(e);v011Features(e);legacy(e);legacyLotMismatch(e);councilPersistence(e);resume(e);protection(e,root);menuAndScreens(e);
         e.shutdown();std::filesystem::remove_all(root);std::cout<<"v0.1.1 gameplay regressions passed\n";return 0;
     }
 };

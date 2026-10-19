@@ -19,7 +19,26 @@ namespace persistence {
 struct SavedLot {
     int owner = -1;
     float incomeMultiplier = 1.0f;
+    // Placement, saved from version 8 so funded and dev-placed lots survive a reload.
+    float cx = 0.0f, cy = 0.0f;
+    int buildingType = 0, baseRevenue = 0;
 };
+
+struct SavedBuilding { int tx = 0, ty = 0, type = 0; };
+struct SavedCity {
+    std::string name;
+    int cx = 0, cy = 0, radius = 0, population = 0, zone = 0, prosperity = 0, growthLevel = 0;
+    int towsCompleted = 0, councilRating = 450;
+    bool exclusiveContract = false;
+};
+// The live map (version 8+): tiles, buildings and towns change through council
+// funding and developer tools, so they are saved instead of regenerated.
+struct SavedWorld {
+    std::vector<int> tiles;
+    std::vector<SavedBuilding> buildings;
+    std::vector<SavedCity> cities;
+};
+constexpr int maxSavedCities = 256;
 
 struct SavedLoan {
     int balance = 0;
@@ -30,11 +49,11 @@ struct SavedJob {
     float x=0,y=0; int payout=0; bool active=true; int carType=0,angle=0,jclass=0,zone=0,jtype=0;
     std::string desc;
 };
-struct SavedCargo { int payout=0,carType=0,jclass=0; };
+struct SavedCargo { int payout=0,carType=0,jclass=0,city=-1; }; // city: pickup municipality, -1 unknown
 struct SavedTruck {
     bool active=false; int model=0; float x=0,y=0; int facing=2;
     std::vector<std::pair<int,int>> route; int ri=0,phase=0;
-    int carType=0,payout=0,jclass=0,jobType=0,kind=-1,slot=-1;
+    int carType=0,payout=0,jclass=0,jobType=0,kind=-1,slot=-1,city=-1;
 };
 struct SavedRuntime {
     std::vector<SavedJob> jobs;
@@ -48,6 +67,8 @@ struct SavedRuntime {
 struct SaveGameData {
     SavedRuntime runtime;
     bool hasRuntime = true;
+    SavedWorld world;
+    bool hasWorld = false; // true writes version 8; false keeps the version 7 layout
     int district = 1;
     int cash = 500;
     int tows = 0;
@@ -168,6 +189,26 @@ inline bool validateSaveGame(const SaveGameData& data, int mapWidth, int mapHeig
     };
     for(const auto& t:r.autoTrucks) if(!truckValid(t,false)){error="invalid fleet assignment or route";return false;}
     for(const auto& t:r.rivalTrucks) if(!truckValid(t,true)){error="invalid rival route";return false;}
+    const int cityLimit=data.hasWorld?static_cast<int>(data.world.cities.size()):maxSavedCities;
+    auto cityValid=[&](int c){return c>=-1&&c<cityLimit;};
+    for(const auto& c:r.carried) if(!cityValid(c.city)){error="invalid cargo municipality";return false;}
+    for(const auto& t:r.autoTrucks) if(!cityValid(t.city)){error="invalid truck municipality";return false;}
+    for(const auto& t:r.rivalTrucks) if(!cityValid(t.city)){error="invalid truck municipality";return false;}
+    if(data.hasWorld){
+        const auto& w=data.world;
+        if(mapWidth<=0||mapHeight<=0||w.tiles.size()!=static_cast<std::size_t>(mapWidth)*static_cast<std::size_t>(mapHeight)
+           ||w.buildings.size()>20000||w.cities.size()>static_cast<std::size_t>(maxSavedCities)){
+            error="invalid saved map";return false;
+        }
+        for(int t:w.tiles) if(t<0||t>7){error="invalid saved map tile";return false;}
+        for(const auto& b:w.buildings) if(b.tx<0||b.ty<0||b.tx>=mapWidth||b.ty>=mapHeight||b.type<0||b.type>5){error="invalid saved building";return false;}
+        for(const auto& c:w.cities)
+            if(c.name.empty()||c.name.size()>64||c.cx<0||c.cy<0||c.cx>=mapWidth||c.cy>=mapHeight||c.radius<0||c.radius>1000
+               ||c.population<0||c.zone<0||c.zone>2||c.prosperity<0||c.prosperity>100||c.growthLevel<0||c.towsCompleted<0
+               ||c.councilRating<-1000||c.councilRating>1000){error="invalid saved town";return false;}
+        for(const auto& l:data.lots)
+            if(!position(l.cx,l.cy)||l.buildingType<0||l.buildingType>5||l.baseRevenue<0||l.baseRevenue>1000000){error="invalid saved lot placement";return false;}
+    }
     error.clear();
     return true;
 }
@@ -175,9 +216,10 @@ inline bool validateSaveGame(const SaveGameData& data, int mapWidth, int mapHeig
 inline bool encodeSaveGame(const SaveGameData& data, int mapWidth, int mapHeight, int tileSize,
                            std::string& contents, std::string& error) {
     if (!validateSaveGame(data, mapWidth, mapHeight, tileSize, error)) return false;
+    const int version = data.hasWorld ? 8 : 7;
     std::ostringstream out;
     out << std::setprecision(std::numeric_limits<double>::max_digits10)
-        << 7 << ' ' << data.district << ' ' << data.cash << ' ' << data.tows << ' '
+        << version << ' ' << data.district << ' ' << data.cash << ' ' << data.tows << ' '
         << data.goal << ' ' << data.drivers << ' ' << data.drivenSlot << ' '
         << (data.marketplaceUnlocked ? 1 : 0) << ' ' << data.truckX << ' ' << data.truckY << ' '
         << data.facing << ' ' << data.day << ' ' << data.week << ' ' << data.month << ' '
@@ -201,17 +243,38 @@ inline bool encodeSaveGame(const SaveGameData& data, int mapWidth, int mapHeight
     for(const auto& j:r.jobs) out << ' ' << j.x << ' ' << j.y << ' ' << j.payout << ' ' << j.active
         << ' ' << j.carType << ' ' << j.angle << ' ' << j.jclass << ' ' << j.zone << ' ' << j.jtype << ' ' << std::quoted(j.desc);
     out << ' ' << r.carried.size();
-    for(const auto& c:r.carried) out << ' ' << c.payout << ' ' << c.carType << ' ' << c.jclass;
+    for(const auto& c:r.carried){
+        out << ' ' << c.payout << ' ' << c.carType << ' ' << c.jclass;
+        if(version>=8) out << ' ' << c.city;
+    }
     auto writeTrucks=[&](const std::vector<SavedTruck>& trucks){
         out << ' ' << trucks.size();
         for(const auto& t:trucks){
             out << ' ' << t.active << ' ' << t.model << ' ' << t.x << ' ' << t.y << ' ' << t.facing
                 << ' ' << t.ri << ' ' << t.phase << ' ' << t.carType << ' ' << t.payout << ' ' << t.jclass
-                << ' ' << t.jobType << ' ' << t.kind << ' ' << t.slot << ' ' << t.route.size();
+                << ' ' << t.jobType << ' ' << t.kind << ' ' << t.slot;
+            if(version>=8) out << ' ' << t.city;
+            out << ' ' << t.route.size();
             for(auto [x,y]:t.route) out << ' ' << x << ' ' << y;
         }
     };
-    writeTrucks(r.autoTrucks); writeTrucks(r.rivalTrucks); out << '\n';
+    writeTrucks(r.autoTrucks); writeTrucks(r.rivalTrucks);
+    if(version>=8){
+        // Version 8 world section: run-length tiles, buildings, towns, lot placements.
+        const auto& w=data.world;
+        std::vector<std::pair<int,int>> runs;
+        for(int t:w.tiles){ if(!runs.empty()&&runs.back().second==t) runs.back().first++; else runs.push_back({1,t}); }
+        out << ' ' << runs.size();
+        for(auto [n,t]:runs) out << ' ' << n << ' ' << t;
+        out << ' ' << w.buildings.size();
+        for(const auto& b:w.buildings) out << ' ' << b.tx << ' ' << b.ty << ' ' << b.type;
+        out << ' ' << w.cities.size();
+        for(const auto& c:w.cities) out << ' ' << std::quoted(c.name) << ' ' << c.cx << ' ' << c.cy << ' ' << c.radius
+            << ' ' << c.population << ' ' << c.zone << ' ' << c.prosperity << ' ' << c.growthLevel
+            << ' ' << c.towsCompleted << ' ' << c.councilRating << ' ' << (c.exclusiveContract ? 1 : 0);
+        for(const auto& l:data.lots) out << ' ' << l.cx << ' ' << l.cy << ' ' << l.buildingType << ' ' << l.baseRevenue;
+    }
+    out << '\n';
     if (!out) {
         error = "failed to serialize save data";
         return false;
@@ -226,7 +289,7 @@ inline bool decodeSaveGameCandidate(const std::string& contents, SaveGameData& c
                                     int mapWidth, int mapHeight, int tileSize, std::string& error) {
     std::istringstream in(contents);
     int version = 0;
-    if (!(in >> version) || version < 1 || version > 7) {
+    if (!(in >> version) || version < 1 || version > 8) {
         error = "unsupported or invalid save version";
         return false;
     }
@@ -359,19 +422,46 @@ inline bool decodeSaveGameCandidate(const std::string& contents, SaveGameData& c
             r.jobs.push_back(std::move(j));
         }
         if(!count(n,2))return invalid();
-        for(int i=0;i<n;++i){SavedCargo c;if(!(in>>c.payout>>c.carType>>c.jclass))return invalid();r.carried.push_back(c);}
+        for(int i=0;i<n;++i){SavedCargo c;if(!(in>>c.payout>>c.carType>>c.jclass))return invalid();
+            if(version>=8&&!(in>>c.city))return invalid();
+            r.carried.push_back(c);}
         std::size_t totalRoute=0;
         auto readTrucks=[&](std::vector<SavedTruck>& trucks,int max){
             int size=0;if(!count(size,max))return false;
             for(int i=0;i<size;++i){SavedTruck t;int routeCount=0;
                 if(!(in>>t.active>>t.model>>t.x>>t.y>>t.facing>>t.ri>>t.phase>>t.carType>>t.payout>>t.jclass
-                     >>t.jobType>>t.kind>>t.slot)||!count(routeCount,std::max(mapWidth,256)*std::max(mapHeight,192)))return false;
+                     >>t.jobType>>t.kind>>t.slot)||(version>=8&&!(in>>t.city))||!count(routeCount,std::max(mapWidth,256)*std::max(mapHeight,192)))return false;
                 totalRoute+=routeCount;if(totalRoute>50000)return false;
                 for(int j=0;j<routeCount;++j){int x,y;if(!(in>>x>>y))return false;t.route.push_back({x,y});}
                 trucks.push_back(std::move(t));
             }return true;
         };
         if(!readTrucks(r.autoTrucks,63)||!readTrucks(r.rivalTrucks,3))return invalid();
+    }
+    candidate.hasWorld=version>=8;
+    candidate.world=SavedWorld{};
+    if(version>=8){
+        auto& w=candidate.world;
+        auto invalid=[&](){error="truncated or invalid saved map";return false;};
+        const std::size_t tileTotal=(mapWidth>0&&mapHeight>0)?static_cast<std::size_t>(mapWidth)*static_cast<std::size_t>(mapHeight):0;
+        long long runCount=0;
+        if(!(in>>runCount)||runCount<0||static_cast<std::size_t>(runCount)>tileTotal)return invalid();
+        w.tiles.reserve(tileTotal);
+        for(long long i=0;i<runCount;++i){
+            long long n=0;int t=0;
+            if(!(in>>n>>t)||n<=0||static_cast<std::size_t>(n)>tileTotal-w.tiles.size())return invalid();
+            w.tiles.insert(w.tiles.end(),static_cast<std::size_t>(n),t);
+        }
+        int n=0;
+        if(!(in>>n)||n<0||n>20000)return invalid();
+        for(int i=0;i<n;++i){SavedBuilding b;if(!(in>>b.tx>>b.ty>>b.type))return invalid();w.buildings.push_back(b);}
+        if(!(in>>n)||n<0||n>maxSavedCities)return invalid();
+        for(int i=0;i<n;++i){SavedCity c;int exclusive=0;
+            if(!(in>>std::quoted(c.name)>>c.cx>>c.cy>>c.radius>>c.population>>c.zone>>c.prosperity>>c.growthLevel
+                 >>c.towsCompleted>>c.councilRating>>exclusive))return invalid();
+            c.exclusiveContract=exclusive!=0;w.cities.push_back(std::move(c));}
+        for(auto& l:candidate.lots) if(!(in>>l.cx>>l.cy>>l.buildingType>>l.baseRevenue))return invalid();
+        if(candidate.decodedLots) *candidate.decodedLots=candidate.lots;
     }
     std::string trailing;
     if (in >> trailing) {

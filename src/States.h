@@ -517,6 +517,9 @@ inline void WorldState::devBulldoze(int tx, int ty){
     }
 }
 inline void WorldState::devPlaceBuilding(int tx, int ty, int type){
+    if (lots.size() >= 10000 || buildings.size() >= 20000) {
+        flashMsg = "Dev: Building limit reached"; flashTimer = 1.5f; return;
+    }
     if (tx >= 0 && tx + 2 < mapW && ty >= 0 && ty + 3 < mapH) {
         int bType = std::clamp(type, 0, 5);
         buildings.push_back({tx, ty, bType});
@@ -563,6 +566,7 @@ inline void WorldState::devPlaceSand(int tx, int ty){
     }
 }
 inline void WorldState::devFoundTown(int tx, int ty, const std::string& name){
+    if (cities.size() >= (std::size_t)persistence::maxSavedCities || tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) return;
     cities.push_back({name, tx, ty, 20, 6000, tt::Z_COM, 70, 1, 0});
     flashMsg = "Dev: Founded Town '" + name + "' at (" + std::to_string(tx) + ", " + std::to_string(ty) + ")";
     flashTimer = 2.5f;
@@ -880,7 +884,7 @@ inline void WorldState::stepTruck(AutoTruck& t, bool rival, float dt){
             // chaseValue rivals grab the fattest payout; others take the nearest call
             float score = chaseValue ? ((float)jobs[i].payout - 0.00004f*d2) : (-d2);
             if(score>bestScore){bestScore=score;best=(int)i;} }
-        if(best>=0){ t.carType=jobs[best].carType; t.payout=jobs[best].payout; t.jclass=jobs[best].jclass; t.jobType=jobs[best].jtype; startRoute(jobs[best].x,jobs[best].y); if(!t.route.empty()){jobs.erase(jobs.begin()+best);t.phase=1;} }
+        if(best>=0){ t.carType=jobs[best].carType; t.payout=jobs[best].payout; t.jclass=jobs[best].jclass; t.jobType=jobs[best].jtype; t.city=cityAtWorld(jobs[best].x,jobs[best].y); startRoute(jobs[best].x,jobs[best].y); if(!t.route.empty()){jobs.erase(jobs.begin()+best);t.phase=1;} }
         return;
     }
     if(t.ri<(int)t.route.size()){ float tx=(t.route[t.ri].first+0.5f)*tile, ty=(t.route[t.ri].second+0.5f)*tile; float dx=tx-t.x,dy=ty-t.y,dist=std::sqrt(dx*dx+dy*dy);
@@ -901,8 +905,7 @@ inline void WorldState::stepTruck(AutoTruck& t, bool rival, float dt){
             else {
                 cash+=t.payout; weeklyRevenueAccum+=t.payout; tows++; reputation=std::min(100.0f,reputation+0.5f);
                 yardImpoundCount++;
-                int cIdx = cityAtWorld(t.x, t.y);
-                if(cIdx >= 0 && cIdx < (int)cities.size()) cities[cIdx].towsCompleted++;
+                if(t.city >= 0 && t.city < (int)cities.size()) cities[t.city].towsCompleted++;
             }
             t.phase=0;
             spawnJob();
@@ -1061,12 +1064,21 @@ inline bool WorldState::saveGame(Engine& e,std::string* error){
     data.runtime.weather=weather;data.runtime.weatherTimer=weatherTimer;data.runtime.spawnTimer=spawnTimer;data.runtime.pulse=pulse;
     data.runtime.announcedMajority=announcedMajority;data.runtime.rivalAggression=rivalAggression;data.runtime.rivalMaxLots=rivalMaxLots;
     data.runtime.positiveMonths=positiveMonths;data.runtime.monthPositive=monthPositive;data.runtime.pendingDistrict=pendingDistrict;
+    auto knownCity=[&](int c){return c>=0&&c<(int)cities.size()?c:-1;}; // towns can change with a new district
+    for(auto& c:data.runtime.carried) c.city=knownCity(c.city);
+    for(auto& t:data.runtime.autoTrucks) t.city=knownCity(t.city);
+    for(auto& t:data.runtime.rivalTrucks) t.city=knownCity(t.city);
     data.district=district; data.cash=cash; data.tows=tows; data.goal=goal; data.drivers=drivers;
     data.drivenSlot=drivenSlot; data.marketplaceUnlocked=marketplaceUnlocked;
     data.truckX=truckX; data.truckY=truckY; data.facing=facing;
     data.day=day; data.week=week; data.month=month; data.year=year; data.dayAccum=dayAccum;
     data.ownedTrucks=ownedTrucks;
-    for(const auto& lot:lots) data.lots.push_back({lot.owner,lot.incomeMult});
+    for(const auto& lot:lots) data.lots.push_back({lot.owner,lot.incomeMult,lot.cx,lot.cy,lot.bType,lot.baseRev});
+    data.hasWorld=true;
+    data.world.tiles=tiles;
+    for(const auto& b:buildings) data.world.buildings.push_back({b.tx,b.ty,b.type});
+    for(const auto& c:cities) data.world.cities.push_back({c.name,c.cx,c.cy,c.radius,c.population,c.zone,c.prosperity,
+        c.growthLevel,c.towsCompleted,c.councilRating,c.exclusiveContract});
     data.reputation=reputation; data.rivalCash=rivalCash; data.rivalReputation=rivalRep;
     data.weeklyRevenueAccum=weeklyRevenueAccum; data.lastWeekRevenue=lastWeekRevenue;
     data.lastWeekExpense=lastWeekExpense;
@@ -1154,13 +1166,28 @@ inline bool WorldState::loadGame(Engine& e,std::string* error){
     loaded.rivalKind=decodedSave.rivalKind; loaded.difficulty=decodedSave.difficulty;
     loaded.optHints=decodedSave.optHints; loaded.optWeather=decodedSave.optWeather;
     loaded.optAutosave=decodedSave.optAutosave; loaded.rng.setState(decodedSave.rngState);
-    if(decodedSave.decodedLots){
-        if(decodedSave.decodedLots->size()==loaded.lots.size()){
-            for(std::size_t i=0;i<loaded.lots.size();++i){
-                loaded.lots[i].owner=(*decodedSave.decodedLots)[i].owner;
-                loaded.lots[i].incomeMult=(*decodedSave.decodedLots)[i].incomeMultiplier;
-            }
-        }else return fail("Saved city does not match this build; original save has been preserved");
+    if(decodedSave.hasWorld){
+        // Version 8+ saves carry the live map, including funded buildings, dev edits and town councils.
+        const auto& w=decodedSave.world;
+        loaded.tiles=w.tiles;
+        loaded.buildings.clear();
+        for(const auto& b:w.buildings) loaded.buildings.push_back({b.tx,b.ty,b.type});
+        loaded.cities.clear();
+        for(const auto& c:w.cities) loaded.cities.push_back({c.name,c.cx,c.cy,c.radius,c.population,c.zone,c.prosperity,
+            c.growthLevel,c.towsCompleted,c.councilRating,c.exclusiveContract});
+        loaded.lots.clear();
+        for(const auto& l:decodedSave.lots) loaded.lots.push_back({l.cx,l.cy,l.owner,l.incomeMultiplier,l.buildingType,l.baseRevenue});
+        loaded.townSel=0;
+    }else if(decodedSave.decodedLots){
+        // Older saves only stored lot ownership against the regenerated city. Earlier builds used a
+        // smaller map, and 0.1.1 saves may hold extra funded lots at the end, so keep ownership for
+        // the lots both cities share and leave the rest as generated instead of rejecting the save.
+        const auto& saved=*decodedSave.decodedLots;
+        const std::size_t shared=std::min(saved.size(),loaded.lots.size());
+        for(std::size_t i=0;i<shared;++i){
+            loaded.lots[i].owner=saved[i].owner;
+            loaded.lots[i].incomeMult=saved[i].incomeMultiplier;
+        }
     }
 
     loaded.rivalTrucks.clear();loaded.autoTrucks.clear();loaded.carried.clear();loaded.jobs.clear();
@@ -1505,18 +1532,23 @@ inline void WorldState::handleEvent(Engine& e, SDL_Event& ev){
     if(k==SDLK_e){
         const float R=48.0f; int b=nearestActiveJob(); float dYard; { float dx=yardX-truckX,dy=yardY-truckY; dYard=dx*dx+dy*dy; }
         if(!carried.empty() && dYard<R*R){
-            int sum=0; for(auto&c:carried)sum+=c.payout; int n=(int)carried.size();
-            int cIdx=cityAtWorld(truckX,truckY);
-            if(cIdx>=0&&cIdx<(int)cities.size()) {
-                cities[cIdx].towsCompleted+=n;
-                cities[cIdx].councilRating=std::min(1000, cities[cIdx].councilRating + 20 * n);
-                if(cities[cIdx].exclusiveContract) sum=(int)(sum * 1.25f);
+            // Credit each vehicle to the municipality it was towed from, not the yard's town.
+            int sum=0; int n=(int)carried.size(); bool municipalBonus=false;
+            for(const auto& c:carried){
+                int pay=c.payout;
+                if(c.city>=0&&c.city<(int)cities.size()){
+                    auto& town=cities[c.city];
+                    town.towsCompleted++;
+                    town.councilRating=std::min(1000, town.councilRating + 20);
+                    if(town.exclusiveContract){ pay=(int)(pay * 1.25f); municipalBonus=true; }
+                }
+                sum+=pay;
             }
             cash+=sum; tows+=n; weeklyRevenueAccum+=sum;
             reputation=std::min(100.0f,reputation+1.0f*n); yardImpoundCount+=n;
             carried.clear(); for(int i=0;i<n;++i)spawnJob();
             flashMsg=std::string("Delivered ")+std::to_string(n)+" vehicle(s)!  +$"+std::to_string(sum);
-            if(cIdx>=0&&cIdx<(int)cities.size()&&cities[cIdx].exclusiveContract) flashMsg += " (+25% Municipal Bonus)";
+            if(municipalBonus) flashMsg += " (+25% Municipal Bonus)";
             flashTimer=3.0f;
             if(tows>=6&&!marketplaceUnlocked){ marketplaceUnlocked=true; toastTimer=7.0f; toastMsg="Business Milestone: 6 Successful Tows!"; toastSub="Vehicle marketplace unlocked - press M"; } advanceGoals(e); return; }
         if(b>=0){ float dx=jobs[b].x-truckX,dy=jobs[b].y-truckY; if(dx*dx+dy*dy<R*R){
@@ -1530,7 +1562,7 @@ inline void WorldState::handleEvent(Engine& e, SDL_Event& ev){
             }
             if(jobs[b].jclass>maxClass()){ flashMsg=std::string("That ")+classWord(jobs[b].jclass)+" job needs a bigger truck"; flashTimer=3.0f; return; }
             if((int)carried.size()>=carryCap()){ flashMsg=std::string("Truck full (capacity ")+std::to_string(carryCap())+") - deliver first"; flashTimer=3.0f; return; }
-            carried.push_back({jobs[b].payout,jobs[b].carType,jobs[b].jclass}); jobs.erase(jobs.begin()+b);
+            carried.push_back({jobs[b].payout,jobs[b].carType,jobs[b].jclass,cityAtWorld(jobs[b].x,jobs[b].y)}); jobs.erase(jobs.begin()+b);
             flashMsg=(carryCap()>1)?("Loaded ("+std::to_string((int)carried.size())+"/"+std::to_string(carryCap())+") - to YARD when full"):"Hooked up - haul it to the YARD"; flashTimer=2.5f; return; } }
     }
 }
