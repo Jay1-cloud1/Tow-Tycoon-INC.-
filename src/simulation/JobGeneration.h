@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../DeterministicRng.h"
+#include "TileIndex.h"
 
 #include <cstdint>
 #include <optional>
@@ -34,7 +35,7 @@ inline std::optional<GeneratedJob> generateJob(
     float reputation,
     DeterministicRng& rng) {
     if (mapWidth <= 0 || mapHeight <= 0 || tileSize <= 0
-        || tiles.size() != static_cast<std::size_t>(mapWidth * mapHeight))
+        || tiles.size() != tileCount(mapWidth, mapHeight))
         return std::nullopt;
 
     static const char* cars[] = {
@@ -47,7 +48,7 @@ inline std::optional<GeneratedJob> generateJob(
     for (int attempt = 0; attempt < 300; ++attempt) {
         const int x = static_cast<int>(rng.bounded(static_cast<std::uint32_t>(mapWidth)));
         const int y = static_cast<int>(rng.bounded(static_cast<std::uint32_t>(mapHeight)));
-        if (tiles[static_cast<std::size_t>(y * mapWidth + x)] != roadTile) continue;
+        if (tiles[tileIndex(x, y, mapWidth)] != roadTile) continue;
 
         const float worldX = (x + 0.5f) * tileSize;
         const float worldY = (y + 0.5f) * tileSize;

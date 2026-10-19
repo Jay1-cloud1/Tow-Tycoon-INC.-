@@ -9,6 +9,7 @@
 #include "simulation/RoadPathfinder.h"
 #include "simulation/RivalEconomy.h"
 #include "simulation/CameraZoom.h"
+#include "simulation/TileIndex.h"
 #include "persistence/SaveGameCodec.h"
 #include "simulation/WeeklyFinances.h"
 #include <algorithm>
@@ -376,7 +377,7 @@ inline void MenuState::render(Engine& e){
 
 // ------------------------------ WorldState impl -----------------------------
 inline WorldState::WorldState(std::uint64_t randomSeed):rng(randomSeed){
-    tiles.assign(mapW*mapH,tt::GRASS); generateCity();
+    tiles.assign(simulation::tileCount(mapW,mapH),tt::GRASS); generateCity();
     int ix=((mapW/2)/kRoadSpacing)*kRoadSpacing, iy=((mapH/2)/kRoadSpacing)*kRoadSpacing;
     truckX=(ix+0.5f)*tile; truckY=(iy+0.5f)*tile; yardX=truckX; yardY=truckY-kRoadSpacing*tile;
     rivalYardX=(kRoadSpacing+0.5f)*tile; rivalYardY=(kRoadSpacing+0.5f)*tile; // rival depot, NW corner
@@ -398,21 +399,21 @@ inline void WorldState::configureRival(){
 }
 inline void WorldState::generateCity(unsigned seed, float revScale){
     for (int y=0;y<mapH;++y) for (int x=0;x<mapW;++x){ bool rx=(x%kRoadSpacing==0),ry=(y%kRoadSpacing==0); int t=tt::GRASS;
-        if(rx||ry)t=tt::ROAD; else if(x%kRoadSpacing==1||x%kRoadSpacing==kRoadSpacing-1||y%kRoadSpacing==1||y%kRoadSpacing==kRoadSpacing-1)t=tt::SIDEWALK; tiles[y*mapW+x]=t; }
-    { int wx=(seed%2)?14:54, wy=(seed%3)?40:16; for (int y=wy;y<wy+6;++y) for(int x=wx;x<wx+8;++x) if(x<mapW&&y<mapH&&tiles[y*mapW+x]==tt::GRASS) tiles[y*mapW+x]=tt::WATER; }
+        if(rx||ry)t=tt::ROAD; else if(x%kRoadSpacing==1||x%kRoadSpacing==kRoadSpacing-1||y%kRoadSpacing==1||y%kRoadSpacing==kRoadSpacing-1)t=tt::SIDEWALK; tiles[simulation::tileIndex(x,y,mapW)]=t; }
+    { int wx=(seed%2)?14:54, wy=(seed%3)?40:16; for (int y=wy;y<wy+6;++y) for(int x=wx;x<wx+8;++x) if(x<mapW&&y<mapH&&tiles[simulation::tileIndex(x,y,mapW)]==tt::GRASS) tiles[simulation::tileIndex(x,y,mapW)]=tt::WATER; }
     std::mt19937 g(seed);
     for (int by=kRoadSpacing;by<mapH-kRoadSpacing;by+=kRoadSpacing) for (int bx=kRoadSpacing;bx<mapW-kRoadSpacing;bx+=kRoadSpacing){
         if(g()%100<70){ int type=(int)(g()%6),tx=bx+2,ty=by+2; buildings.push_back({tx,ty,type});
-            for(int xx=tx;xx<tx+3;++xx) if(xx<mapW&&ty+3<mapH) tiles[(ty+3)*mapW+xx]=tt::SIDEWALK;
+            for(int xx=tx;xx<tx+3;++xx) if(xx<mapW&&ty+3<mapH) tiles[simulation::tileIndex(xx,ty+3,mapW)]=tt::SIDEWALK;
             // each building gets an adjacent "lot" (the space in front)
             lots.push_back({ (tx+1.5f)*tile, (ty+4.4f)*tile, -1, 1.0f, type, (int)((400+type*60)*revScale) }); }
-        else for(int k=0;k<3;++k){ int tx=bx+1+(int)(g()%5),ty=by+1+(int)(g()%5); if(tx<mapW&&ty<mapH&&tiles[ty*mapW+tx]==tt::GRASS) tiles[ty*mapW+tx]=tt::TREE; } }
+        else for(int k=0;k<3;++k){ int tx=bx+1+(int)(g()%5),ty=by+1+(int)(g()%5); if(tx<mapW&&ty<mapH&&tiles[simulation::tileIndex(tx,ty,mapW)]==tt::GRASS) tiles[simulation::tileIndex(tx,ty,mapW)]=tt::TREE; } }
 }
 // Expand into a fresh, tougher district. Keeps your company (cash, fleet, drivers,
 // reputation, loans, tows); regenerates the map and installs a new rival.
 inline void WorldState::startDistrict(int n){
     district=n;
-    tiles.assign(mapW*mapH,tt::GRASS); buildings.clear(); lots.clear();
+    tiles.assign(simulation::tileCount(mapW,mapH),tt::GRASS); buildings.clear(); lots.clear();
     generateCity(99u + (unsigned)n*7u, 1.0f + 0.25f*(n-1));
     int ix=((mapW/2)/kRoadSpacing)*kRoadSpacing, iy=((mapH/2)/kRoadSpacing)*kRoadSpacing;
     truckX=(ix+0.5f)*tile; truckY=(iy+0.5f)*tile; yardX=truckX; yardY=truckY-kRoadSpacing*tile;
@@ -427,7 +428,7 @@ inline void WorldState::startDistrict(int n){
     toastMsg=std::string("Welcome to District ")+std::to_string(n)+"!";
     toastSub=std::string(rivalCompanyName(rivalKind))+" ("+rivalKindName(rivalKind)+") runs this turf - take it from them."; toastTimer=8.0f;
 }
-inline int WorldState::tileAtWorld(float wx,float wy) const { int tx=(int)std::floor(wx/tile),ty=(int)std::floor(wy/tile); if(tx<0||tx>=mapW||ty<0||ty>=mapH)return -1; return tiles[ty*mapW+tx]; }
+inline int WorldState::tileAtWorld(float wx,float wy) const { int tx=(int)std::floor(wx/tile),ty=(int)std::floor(wy/tile); if(tx<0||tx>=mapW||ty<0||ty>=mapH)return -1; return tiles[simulation::tileIndex(tx,ty,mapW)]; }
 inline void WorldState::worldToScreen(Engine& e,float wx,float wy,int& sx,int& sy) const { float z=e.camera.zoom; sx=(int)std::round((wx-e.camera.x)*z+e.logicalW()*0.5f); sy=(int)std::round((wy-e.camera.y)*z+e.logicalH()*0.5f); }
 inline std::string WorldState::streetIntersectionAt(float wx,float wy) const {
     static const std::array<const char*,10> eastWest{{"Main St","Oak Ave","Pine St","Maple Ave","Harbor Blvd","Elm Rd","Cedar St","Sunset Dr","2nd St","Industrial Way"}};
@@ -446,7 +447,7 @@ inline void WorldState::drawMinimap(Engine& e,float targetX,float targetY,bool h
     const int mapX=panelX+13,mapY=panelY+22,mapWpx=168,mapHpx=126;
     fillRect(e,mapX,mapY,mapWpx,mapHpx,44,52,52,255);
     for(int ty=0;ty<mapH;++ty) for(int tx=0;tx<mapW;++tx){
-        const int tileType=tiles[static_cast<std::size_t>(ty*mapW+tx)];
+        const int tileType=tiles[simulation::tileIndex(tx,ty,mapW)];
         if(tileType!=tt::ROAD && tileType!=tt::WATER) continue;
         const int left=mapX+tx*mapWpx/mapW, right=mapX+(tx+1)*mapWpx/mapW;
         const int top=mapY+ty*mapHpx/mapH, bottom=mapY+(ty+1)*mapHpx/mapH;
@@ -705,7 +706,7 @@ inline bool WorldState::loadGame(Engine& e,std::string* error){
         return fail(codecError);
 
     loaded.district=decodedSave.district;
-    loaded.tiles.assign(loaded.mapW*loaded.mapH,tt::GRASS);
+    loaded.tiles.assign(simulation::tileCount(loaded.mapW,loaded.mapH),tt::GRASS);
     loaded.buildings.clear();
     loaded.lots.clear();
     const unsigned citySeed=loaded.district==1?99u:99u+(unsigned)loaded.district*7u;
@@ -957,7 +958,7 @@ inline void WorldState::drawWorld(Engine& e){
     int sX=std::max(0,(int)std::floor((e.camera.x-hw)/tile)),sY=std::max(0,(int)std::floor((e.camera.y-hh)/tile));
     int eX=std::min(mapW-1,(int)std::floor((e.camera.x+hw)/tile)),eY=std::min(mapH-1,(int)std::floor((e.camera.y+hh)/tile));
     int ds=std::max(1,(int)std::round(tile*zoom));
-    for(int ty=sY;ty<=eY;++ty)for(int tx=sX;tx<=eX;++tx){ int id=tiles[ty*mapW+tx]; if(id<0)continue; SDL_Rect src{(id%e.tilesetCols)*tile,(id/e.tilesetCols)*tile,tile,tile}; int xx,yy; worldToScreen(e,(float)tx*tile,(float)ty*tile,xx,yy); SDL_Rect dst{xx,yy,ds,ds}; SDL_RenderCopy(e.renderer(),e.tileset,&src,&dst); }
+    for(int ty=sY;ty<=eY;++ty)for(int tx=sX;tx<=eX;++tx){ int id=tiles[simulation::tileIndex(tx,ty,mapW)]; if(id<0)continue; SDL_Rect src{(id%e.tilesetCols)*tile,(id/e.tilesetCols)*tile,tile,tile}; int xx,yy; worldToScreen(e,(float)tx*tile,(float)ty*tile,xx,yy); SDL_Rect dst{xx,yy,ds,ds}; SDL_RenderCopy(e.renderer(),e.tileset,&src,&dst); }
     if(e.buildingsTex){ const float fw=3.0f*tile,fh=fw*(float)e.buildingCellH/(float)e.buildingCellW;
         for(auto&b:buildings){ float wx=b.tx*(float)tile,wy=(b.ty+3)*(float)tile-fh; int xx,yy; worldToScreen(e,wx,wy,xx,yy); SDL_Rect src{b.type*e.buildingCellW,0,e.buildingCellW,e.buildingCellH}; SDL_Rect dst{xx,yy,(int)std::round(fw*zoom),(int)std::round(fh*zoom)}; SDL_RenderCopy(e.renderer(),e.buildingsTex,&src,&dst); } }
 }

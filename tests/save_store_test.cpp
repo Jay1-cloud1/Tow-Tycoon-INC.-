@@ -28,7 +28,7 @@ int main() {
     if (!SaveStore::readAll(savePath, contents, error) || contents != "second-save") return 8;
 
     const auto oversizedPath = root / "oversized.tt";
-    if (!SaveStore::writeAtomically(oversizedPath, std::string(1024 * 1024 + 1, 'x'), error)) return 9;
+    if (!SaveStore::writeAtomically(oversizedPath, std::string(std::size_t{1024} * 1024 + 1, 'x'), error)) return 9;
     if (SaveStore::readAll(oversizedPath, contents, error) || error.empty()) return 10;
 
     std::error_code cleanupError;
