@@ -26,6 +26,7 @@ bool testVersionedDecode() {
             std::cerr << "version " << version << ": " << error << '\n';
             return false;
         }
+        if(decoded.hasRuntime)return false;
         if (decoded.cash != 1200 || decoded.tows != 8 || decoded.ownedTrucks.size() != 2
             || decoded.district != 1)
             {
@@ -48,6 +49,31 @@ bool testVersionedDecode() {
     return true;
 }
 
+bool testRuntimeContinuity() {
+    persistence::SaveGameData data;
+    data.ownedTrucks={0,0,1};data.drivers=2;data.truckX=64;data.truckY=80;data.rngState=1234567;
+    data.runtime.jobs.push_back({8,8,150,true,2,90,0,1,2,"repo: quoted \"car\" on Main St"});
+    data.runtime.carried.push_back({175,1,0});data.runtime.weather=2;data.runtime.weatherTimer=7.5f;
+    data.runtime.spawnTimer=1.25f;data.runtime.pulse=123.5f;data.runtime.positiveMonths=5;data.runtime.pendingDistrict=2;
+    persistence::SavedTruck truck;truck.active=true;truck.slot=1;truck.model=0;truck.x=8;truck.y=8;
+    truck.phase=1;truck.ri=1;truck.route={{0,0},{1,0}};truck.payout=125;
+    data.runtime.autoTrucks.push_back(truck);
+    std::string text,error;
+    if(!persistence::encodeSaveGame(data,80,60,16,text,error))return false;
+    persistence::SaveGameData decoded;
+    if(!persistence::decodeSaveGame(text,decoded,80,60,16,error)||!decoded.hasRuntime)return false;
+    std::string roundtrip;
+    if(!persistence::encodeSaveGame(decoded,80,60,16,roundtrip,error)||roundtrip!=text)return false;
+    if(decoded.runtime.jobs[0].desc!=data.runtime.jobs[0].desc||decoded.runtime.carried[0].payout!=175
+       ||decoded.runtime.autoTrucks[0].route!=truck.route||decoded.runtime.positiveMonths!=5||decoded.runtime.pendingDistrict!=2)return false;
+    data.runtime.autoTrucks.push_back(truck);
+    if(persistence::encodeSaveGame(data,80,60,16,roundtrip,error))return false;
+    data.runtime.autoTrucks.pop_back();data.runtime.autoTrucks[0].slot=0;
+    if(persistence::encodeSaveGame(data,80,60,16,roundtrip,error))return false;
+    decoded.cash=777;
+    if(persistence::decodeSaveGame(text.substr(0,text.size()/2),decoded,80,60,16,error)||decoded.cash!=777)return false;
+    return true;
+}
 bool testRoundTripAndValidation() {
     persistence::SaveGameData data;
     data.district = 3;
@@ -95,5 +121,7 @@ bool testRoundTripAndValidation() {
 int main() {
     if (!testVersionedDecode()) return 1;
     if (!testRoundTripAndValidation()) return 2;
+    if (!testRuntimeContinuity()) return 3;
     return 0;
 }
+

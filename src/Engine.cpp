@@ -152,12 +152,14 @@ bool Engine::init(const std::string& title, int w, int h) {
     lotTex = loadTexture("lot_marker.png", &lotW, &lotH);
     iconsTex = loadTexture("icons.png");
     menuBg = loadTexture("menu_bg.png", &menuBgW, &menuBgH);
+    openttdGuiTex = loadTexture("openttd/gui04.png");
     logMessage(std::string("Gameplay art: trucks=") + (trucksTex ? "ok" : "missing")
                + " cars=" + (carsTex ? "ok" : "missing")
                + " buildings=" + (buildingsTex ? "ok" : "missing")
                + " rival=" + (rivalTrucksTex ? "ok" : "missing")
                + " lot=" + (lotTex ? "ok" : "missing")
                + " icons=" + (iconsTex ? "ok" : "missing")
+               + " openttd_gui=" + (openttdGuiTex ? "ok" : "missing")
                + " menu_bg=" + (menuBg ? "ok" : "missing"));
 
     m_lastTicks = SDL_GetTicks();
@@ -225,8 +227,15 @@ void Engine::run() {
         const unsigned simulationSteps = m_simulationClock.advance(elapsed);
 
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) m_quit = true;
+            if (e.type == SDL_QUIT) { requestQuit(); if(m_quit)break; continue; }
+            if (e.type == SDL_MOUSEBUTTONDOWN) {
+                float x = 0, y = 0;
+                SDL_RenderWindowToLogical(m_renderer, e.button.x, e.button.y, &x, &y);
+                m_logicalMouseX = static_cast<int>(std::round(x));
+                m_logicalMouseY = static_cast<int>(std::round(y));
+            }
             if (m_state) m_state->handleEvent(*this, e);
+            if(m_quit)break;
         }
 
         int winW = 0, winH = 0;
@@ -272,6 +281,7 @@ void Engine::run() {
 }
 
 void Engine::shutdown() {
+    if (openttdGuiTex) SDL_DestroyTexture(openttdGuiTex);
     if (menuBg) SDL_DestroyTexture(menuBg);
     if (iconsTex) SDL_DestroyTexture(iconsTex);
     if (lotTex) SDL_DestroyTexture(lotTex);
@@ -320,6 +330,8 @@ bool Engine::isFullscreen() const {
 }
 
 void Engine::requestQuit() {
+    if (m_state && !m_state->prepareQuit(*this)) return;
     logMessage("Quit requested");
     m_quit = true;
 }
+

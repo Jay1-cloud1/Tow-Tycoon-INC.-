@@ -14,16 +14,16 @@
 
 namespace {
 bool replaceFile(const std::filesystem::path& temp, const std::filesystem::path& path,
-                 const std::filesystem::path& backup, bool hasCurrent, std::string& error) {
+                 const std::filesystem::path& backup, bool hasCurrent, std::string& error, bool preserveBackup) {
 #ifdef _WIN32
     if (hasCurrent) {
         std::error_code ec;
-        std::filesystem::remove(backup, ec);
+        if(!preserveBackup) std::filesystem::remove(backup, ec);
         if (ec) {
             error = "cannot remove previous backup: " + ec.message();
             return false;
         }
-        if (!ReplaceFileW(path.c_str(), temp.c_str(), backup.c_str(), 0,
+        if (!ReplaceFileW(path.c_str(), temp.c_str(), preserveBackup ? nullptr : backup.c_str(), 0,
                           nullptr, nullptr)) {
             error = "cannot atomically replace save: "
                 + std::system_category().message(static_cast<int>(GetLastError()));
@@ -35,8 +35,11 @@ bool replaceFile(const std::filesystem::path& temp, const std::filesystem::path&
         return false;
     }
 #else
-    (void)backup;
-    (void)hasCurrent;
+    if(hasCurrent && !preserveBackup){
+        std::error_code copyError;
+        std::filesystem::copy_file(path,backup,std::filesystem::copy_options::overwrite_existing,copyError);
+        if(copyError){error="cannot create save backup: "+copyError.message();return false;}
+    }
     std::error_code ec;
     std::filesystem::rename(temp, path, ec);
     if (ec) {
@@ -82,7 +85,7 @@ bool SaveStore::readAll(const std::filesystem::path& path, std::string& contents
 }
 
 bool SaveStore::writeAtomically(const std::filesystem::path& path, const std::string& contents,
-                                std::string& error) {
+                                std::string& error, bool preserveBackup) {
     error.clear();
     std::filesystem::path temp = path;
     temp += std::filesystem::path::string_type{'.', 't', 'm', 'p'};
@@ -124,21 +127,14 @@ bool SaveStore::writeAtomically(const std::filesystem::path& path, const std::st
         error = "cannot inspect existing save: " + detail;
         return false;
     }
-    if (!replaceFile(temp, path, backup, hasCurrent, error)) {
+    if (!replaceFile(temp, path, backup, hasCurrent, error, preserveBackup)) {
         std::error_code cleanupError;
         std::filesystem::remove(temp, cleanupError);
         if (cleanupError) error += "; temporary cleanup failed: " + cleanupError.message();
         return false;
     }
 
-#ifdef _WIN32
-    if (hasCurrent) {
-        std::filesystem::remove(backup, ec);
-        if (ec) error = "save completed but backup cleanup failed: " + ec.message();
-        else error.clear();
-    } else error.clear();
-#else
     error.clear();
-#endif
     return true;
 }
+
