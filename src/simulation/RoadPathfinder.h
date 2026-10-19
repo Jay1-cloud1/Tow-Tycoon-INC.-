@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "TileIndex.h"
+
 namespace simulation {
 
 inline std::vector<std::pair<int, int>> findRoadPath(
@@ -19,12 +21,14 @@ inline std::vector<std::pair<int, int>> findRoadPath(
     int startY,
     int goalX,
     int goalY) {
-    if (width <= 0 || height <= 0 || tiles.size() != static_cast<std::size_t>(width * height))
+    // Node ids below are ints, so refuse grids with more cells than int holds.
+    if (width <= 0 || height <= 0 || tiles.size() != tileCount(width, height)
+        || tileCount(width, height) > static_cast<std::size_t>(INT_MAX))
         return {};
 
     auto isRoad = [&](int x, int y) {
         return x >= 0 && x < width && y >= 0 && y < height
-            && tiles[static_cast<std::size_t>(y * width + x)] == roadTile;
+            && tiles[tileIndex(x, y, width)] == roadTile;
     };
     auto snap = [&](int& x, int& y) {
         if (isRoad(x, y)) return;
@@ -52,9 +56,9 @@ inline std::vector<std::pair<int, int>> findRoadPath(
     snap(goalX, goalY);
     if (!isRoad(startX, startY) || !isRoad(goalX, goalY)) return {};
 
-    const int nodeCount = width * height;
-    std::vector<int> cameFrom(static_cast<std::size_t>(nodeCount), -1);
-    std::vector<int> cost(static_cast<std::size_t>(nodeCount), INT_MAX);
+    const std::size_t nodeCount = tileCount(width, height);
+    std::vector<int> cameFrom(nodeCount, -1);
+    std::vector<int> cost(nodeCount, INT_MAX);
     auto id = [width](int x, int y) { return y * width + x; };
     using QueueItem = std::pair<int, int>;
     std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> frontier;

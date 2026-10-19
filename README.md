@@ -2,7 +2,7 @@
 
 Build a towing empire in Tow Tycoon! Master 16-bit retro dispatching, dynamic competitor AI, and robust local file management in a high-performance C++ simulation.
 
-**Version 0.1.0 (pre-release).** This is an early Windows test build. Expect rough edges, and please report bugs as GitHub issues.
+**Version 0.2.0 (pre-release).** This is an early Windows test build. Expect rough edges, and please report bugs as GitHub issues.
 
 ## Install and play (Windows)
 
@@ -57,7 +57,7 @@ On Linux, install the SDL2, SDL2_image and SDL2_ttf development packages and use
 
 ## Releasing
 
-Pushing a tag such as `v0.1.0` runs the **Windows build** workflow, which builds, tests and packages the game, then attaches the zip to a draft GitHub Release for review. Every push and pull request also builds the zip as a downloadable workflow artifact. Bump the version in `CMakeLists.txt` (`project(TowTycoon VERSION ...)`) before tagging.
+Bump the version in `CMakeLists.txt` (`project(TowTycoon VERSION ...)`) and `src/Version.h`, then publish a release from the [New release](../../releases/new) page with a new tag such as `v0.2.0` (tick **Set as a pre-release** for test builds). Creating the tag runs the **Windows build** workflow, which builds, tests and packages the game, then attaches the zip to that release a few minutes later. Every push and pull request also builds the zip as a downloadable workflow artifact.
 
 ## License
 

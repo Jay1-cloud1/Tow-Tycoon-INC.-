@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TowTycoon VERSION 0.1.0 LANGUAGES CXX)
+project(TowTycoon VERSION 0.2.0 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)

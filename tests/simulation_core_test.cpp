@@ -2,6 +2,7 @@
 #include "simulation/CameraZoom.h"
 #include "simulation/JobGeneration.h"
 #include "simulation/RoadPathfinder.h"
+#include "simulation/TileIndex.h"
 #include "simulation/RoadsideJobs.h"
 #include "simulation/RivalEconomy.h"
 #include "simulation/WeeklyFinances.h"
@@ -33,10 +34,10 @@ bool testFixedTicks() {
 
 bool testJobReplay() {
     constexpr int width = 32, height = 24, road = 1;
-    std::vector<int> tiles(width * height, 0);
+    std::vector<int> tiles(simulation::tileCount(width, height), 0);
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
-            if (x % 8 == 0 || y % 8 == 0) tiles[y * width + x] = road;
+            if (x % 8 == 0 || y % 8 == 0) tiles[simulation::tileIndex(x, y, width)] = road;
 
     DeterministicRng rngA(20261016), rngB(20261016);
     for (int i = 0; i < 100; ++i) {
@@ -77,9 +78,9 @@ bool testLoanRepayment() {
 
 bool testRoadsideServiceJobs() {
     constexpr int width=32,height=24,road=1;
-    std::vector<int> tiles(width*height,0);
+    std::vector<int> tiles(simulation::tileCount(width, height), 0);
     for(int y=0;y<height;++y) for(int x=0;x<width;++x)
-        if(x%8==0||y%8==0) tiles[y*width+x]=road;
+        if(x%8==0||y%8==0) tiles[simulation::tileIndex(x, y, width)]=road;
     DeterministicRng rng(77881);
     for(int i=0;i<100;++i){
         const auto job=simulation::generateRoadsideJob(tiles,width,height,road,16,240,160,rng);
@@ -100,10 +101,10 @@ bool testCameraZoom() {
 
 bool testRouting() {
     constexpr int width = 7, height = 7, road = 1;
-    std::vector<int> tiles(width * height, 0);
+    std::vector<int> tiles(simulation::tileCount(width, height), 0);
     for (int i = 0; i < width; ++i) {
-        tiles[3 * width + i] = road;
-        tiles[i * width + 3] = road;
+        tiles[simulation::tileIndex(i, 3, width)] = road;
+        tiles[simulation::tileIndex(3, i, width)] = road;
     }
     const auto path = simulation::findRoadPath(tiles,width,height,road,0,3,6,3);
     if (path.size() != 7 || path.front() != std::pair<int,int>{0,3}
@@ -111,12 +112,12 @@ bool testRouting() {
         return false;
     for (std::size_t i = 0; i < path.size(); ++i) {
         const auto [x,y] = path[i];
-        if (tiles[y * width + x] != road) return false;
+        if (tiles[simulation::tileIndex(x, y, width)] != road) return false;
         if (i > 0 && std::abs(path[i].first-path[i-1].first)
                      + std::abs(path[i].second-path[i-1].second) != 1)
             return false;
     }
-    tiles[3 * width + 3] = 0;
+    tiles[simulation::tileIndex(3, 3, width)] = 0;
     return simulation::findRoadPath(tiles,width,height,road,0,3,6,3).empty();
 }
 
@@ -136,10 +137,10 @@ struct ReplaySnapshot {
 
 ReplaySnapshot replayAtFrameRate(double frameSeconds, int frames) {
     constexpr int width = 40, height = 32, road = 1, tileSize = 16;
-    std::vector<int> tiles(width * height, 0);
+    std::vector<int> tiles(simulation::tileCount(width, height), 0);
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
-            if (x % 8 == 0 || y % 8 == 0) tiles[y * width + x] = road;
+            if (x % 8 == 0 || y % 8 == 0) tiles[simulation::tileIndex(x, y, width)] = road;
 
     ReplaySnapshot state;
     for (int i = 0; i < 18; ++i)
