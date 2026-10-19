@@ -30,15 +30,28 @@ WorldSim ──interfaces──> Dispatch/Routing ──interfaces──> Econom
 | `persistence/SaveGameCodec.h` | versioned save serialization and state validation |
 | `SaveStore.*` | bounded save reads and checked atomic writes |
 
-`WorldState` already holds: tile city + buildings, drivable truck, job system
-(tiered reg/med/heavy), lots + bidding, an AI rival (weekly pure simulation),
-reputation, finances/loans, stock market/IPO/buyout, weather + time-of-day,
-versioned text save/load (v6, with persisted deterministic RNG state,
-legacy-save migration, OS user-data storage, and temporary-file replacement),
-visible rain effects, street-named objective cues, and a HUD minimap.
-Deterministic simulation rules and versioned persistence are extracted into
-SDL-independent modules under `src/simulation/` and `src/persistence/`; the
-UI-facing state currently maps those values to and from game entities.
+`WorldState` already holds: 10x expanded terrain grid (256x192 tiles), 6 regional
+municipalities with dynamic growth simulation (`Towburg Central`, `Pinehurst Valley`,
+`Oakridge Heights`, `Port Towton`, `Sunnyside Commercial`, `Ironwood Industrial`),
+dense urban street blocks with dedicated recreational parks, drivable truck,
+dynamic job system (scaled order replenishment, fleetMaxClass dispatching),
+lots + bidding, an AI rival (weekly pure simulation), reputation, finances/loans,
+stock market (IPO, 5% tranche share selling and buybacks, rival acquisition),
+weather + time-of-day, OpenTTD developer mode landscape controls (toggled by F1/~
+with scriptable C++ agent API), modern glassmorphism UI/UX layout (top header,
+floating dispatch tracker, bottom command dock, regional radar minimap),
+OpenTTD Town Directory and Local Authority council standing relations (`P_TOWNS`,
+ratings from -1000 to +1000, Fund Buildings, Sponsor Road Works, Exclusive Municipal
+Contracts with +25% payout bonus, and Council Bribery), 1,000-Point Detailed Company
+Performance Rating evaluation matrix (`P_PERF`, across 7 operational categories with
+executive tycoon company ranks), OpenTTD live breaking news wire ticker,
+official OpenTTD/OpenGFX graphics asset pipeline (`Assets/openttd/` sprite sheets
+and `Engine::openttdGuiTex` UI icons), versioned text save/load (v8, with persisted
+deterministic RNG state, legacy-save migration, OS user-data storage, and
+temporary-file replacement), visible rain effects, street-named objective cues,
+and a HUD minimap. Deterministic simulation rules and versioned persistence are
+extracted into SDL-independent modules under `src/simulation/` and `src/persistence/`;
+the UI-facing state currently maps those values to and from game entities.
 
 The SDL window is resizable and uses a fixed 1280-pixel logical width with an
 aspect-aware logical height for landscape displays. HUD/footer rows and menu
@@ -56,6 +69,32 @@ including income, weather, job generation, and the in-game clock. The fixed
 step drops wall-time beyond a 250 ms frame delta to avoid catch-up spirals;
 replay determinism is defined over the same sequence of simulation ticks and
 inputs, not arbitrary real-time frame schedules.
+
+v0.2.0 saves (v8) also store the live map: run-length tiles, buildings, towns
+with council ratings and contracts, lot placements, and the pickup town of each
+carried or in-flight tow. Older saves whose lot list differs from the regenerated
+city keep ownership of the shared lots instead of being rejected.
+
+v0.1.1 saves include cargo, generated jobs, weather/spawn timers, RNG, fleet-slot
+assignments, active routes and credit history. Versions 1-6 migrate without
+inventing a prior credit history. The previous save is retained as `.bak`;
+failed reads cannot overwrite the original, and a valid backup can be recovered.
+Window-close saves first and cancels exit on write failure. Each staffed spare
+truck has one exclusive inventory-slot assignment. Expansion drains in-flight
+player/fleet work before switching districts. Gameplay enforces the persistence
+limits of 64 trucks and eight districts. General borrowing requires six fully
+positive-cash months, no active loan, and payments at most half the last weekly
+cash surplus. Existing legacy loans remain repayable.
+
+The SDL-backed `gameplay_regressions` CTest covers actual event handlers,
+save/resume continuity, backup recovery, safe exit, eligibility and limits,
+exclusive fleet assignments, menu preferences, 10x terrain dimensions (256x192),
+named regional cities, public share selling and buyback economics, developer mode
+landscape manipulation API, Town Directory and council investment actions, Company
+Performance Rating evaluation matrix, and rendering all gameplay panels (including
+Market, Fleet, Banking, Stocks, Settings, Towns, and Performance) at 560, 591 and
+720 logical pixels tall. Set `TT_SCREENSHOT_DIR` to an existing scratch directory
+when running the test to capture its rendered panels.
 
 The executable resolves bundled assets relative to its executable directory
 on every platform. MinGW runtime packaging resolves DLLs from the selected
@@ -158,3 +197,4 @@ Keep events as a small tagged struct drained each tick. Examples:
 
 *Status legend: **built** = in game now and verified; partial = seed exists;
 planned = designed, not yet coded.*
+
