@@ -15,6 +15,7 @@ struct Camera {
 };
 
 class Engine {
+    friend struct WorldRegression;
 public:
     bool init(const std::string& title, int w, int h);
     void run();
@@ -78,12 +79,18 @@ public:
     SDL_Texture* menuBg = nullptr;
     int menuBgW = 0;
     int menuBgH = 0;
+    SDL_Texture* openttdGuiTex = nullptr; // OpenTTD UI graphics & icons
 
     float dt() const { return m_dt; } // seconds since last frame
     const std::string& baseDir() const { return m_basePath; }
     const std::string& saveDir() const { return m_savePath; }
 
     Camera camera;
+    struct Preferences {
+        int difficulty = 1;
+        bool hints = true, weather = true, autosave = true;
+        bool overrideSaved = false;
+    } preferences;
 
 private:
     void updateViewport();
@@ -115,3 +122,4 @@ private:
     int m_logicalMouseX = 0;
     int m_logicalMouseY = 0;
 };
+

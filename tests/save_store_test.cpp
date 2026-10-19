@@ -18,6 +18,11 @@ int main() {
     if (!SaveStore::writeAtomically(savePath, "second-save", error)) return 3;
     if (!SaveStore::readAll(savePath, contents, error) || contents != "second-save") return 4;
 
+    const auto backupPath=std::filesystem::path(savePath.string()+".bak");
+    if(!SaveStore::readAll(backupPath,contents,error)||contents!="first-save")return 12;
+    if(!SaveStore::writeAtomically(savePath,"damaged-primary",error))return 13;
+    if(!SaveStore::writeAtomically(savePath,"second-save",error,true))return 14;
+    if(!SaveStore::readAll(backupPath,contents,error)||contents!="second-save")return 15;
     const auto blockingFile = root / "not-a-directory";
     {
         std::ofstream blocker(blockingFile);
@@ -36,3 +41,4 @@ int main() {
     if (cleanupError) return 11;
     return 0;
 }
+

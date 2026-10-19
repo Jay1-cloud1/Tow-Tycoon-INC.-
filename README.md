@@ -16,7 +16,7 @@ Your progress is saved in `%APPDATA%\TowTycoon\TowTycoon\savegame.tt`. The game 
 
 Drive your tow truck to dispatched breakdowns, hook them up, and haul them back to your yard for cash. Grow from one used wheel-lift into a fleet, win contract lots from your rival, borrow, go public, and buy out the competition.
 
-**Main menu:** Continue resumes your save. New Game starts over (it asks you to confirm when a save exists). Settings toggles fullscreen (F11 also works).
+**Main menu:** Continue resumes your save. New Game starts over (it asks you to confirm when a save exists). Settings sets difficulty, weather, hints, autosave and fullscreen (F11 also toggles fullscreen). See CHANGELOG.md for what is new in each version.
 
 | Key | Action |
 | --- | --- |
@@ -26,7 +26,10 @@ Drive your tow truck to dispatched breakdowns, hook them up, and haul them back 
 | M | Vehicle marketplace (unlocks after 6 tows) |
 | O | Fleet and drivers |
 | F | Bank, finances and loans |
-| T | Stock market, IPO and rival buyout |
+| T | Stock market: IPO, sell shares (S), buy back (B), rival buyout |
+| H or Y | Town Directory and local council relations |
+| P | Company performance rating |
+| F1 or ` | Developer mode (landscape tools) |
 | [ and ] | Switch which of your trucks you drive |
 | Mouse wheel, + and - | Zoom |
 | F5 / F9 | Save / load |

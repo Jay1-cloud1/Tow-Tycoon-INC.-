@@ -16,3 +16,7 @@ The main libraries are:
 | GCC runtime (libgcc, libstdc++), winpthreads | GPL with the GCC Runtime Library Exception / MIT |
 
 JBIG-KIT is pulled in by libtiff in the MSYS2 build of SDL2_image. Its GPL license is a concern for a closed-source game, so it should be removed from the shipped build (for example by building SDL2_image without TIFF support, since the game only loads PNG files) before a public 1.0 release.
+
+## Game graphics
+
+`Assets/openttd/` holds sprites taken from OpenGFX, the OpenTTD base graphics set. OpenGFX is licensed under GPL-2.0, which requires the sprites (and possibly the game that ships them) to be shared under the same terms. Credit OpenGFX and ship its license text with any build that includes these files, and replace them with original art before a commercial or all-rights-reserved 1.0 release.

@@ -89,6 +89,14 @@ else()
 endif()
 
 if(BUILD_TESTING)
+  add_executable(TowTycoonGameplayTests tests/gameplay_regression_test.cpp src/Engine.cpp src/SaveStore.cpp)
+  target_include_directories(TowTycoonGameplayTests PRIVATE src $<TARGET_PROPERTY:TowTycoon,INCLUDE_DIRECTORIES>)
+  target_compile_definitions(TowTycoonGameplayTests PRIVATE $<TARGET_PROPERTY:TowTycoon,COMPILE_DEFINITIONS> TT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_directories(TowTycoonGameplayTests PRIVATE $<TARGET_PROPERTY:TowTycoon,LINK_DIRECTORIES>)
+  target_link_libraries(TowTycoonGameplayTests PRIVATE $<TARGET_PROPERTY:TowTycoon,LINK_LIBRARIES>)
+  add_test(NAME gameplay_regressions COMMAND TowTycoonGameplayTests)
+  set_tests_properties(gameplay_regressions PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy" TIMEOUT 60)
+
   add_executable(TowTycoonRngTests tests/deterministic_rng_test.cpp)
   target_include_directories(TowTycoonRngTests PRIVATE src)
   add_test(NAME deterministic_rng COMMAND TowTycoonRngTests)
@@ -374,3 +382,4 @@ if(MINGW)
     "execute_process(COMMAND \"${CMAKE_COMMAND}\" -Dexe=\"$<TARGET_FILE:TowTycoon>\" -Ddest=\"${CMAKE_INSTALL_PREFIX}\" -Dobjdump=\"${CMAKE_OBJDUMP}\" -Dmingw_bin=\"${_runtime_bin_dir}\" -P \"${_install_runtime_deps_script}\")"
   )
 endif()
+

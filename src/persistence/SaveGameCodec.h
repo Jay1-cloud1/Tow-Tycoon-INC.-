@@ -3,6 +3,8 @@
 // Versioned save schema and validation, independent of SDL and game-state classes.
 
 #include <cmath>
+#include "../simulation/ProgressionRules.h"
+#include <algorithm>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -24,7 +26,28 @@ struct SavedLoan {
     int weeklyPayment = 0;
 };
 
+struct SavedJob {
+    float x=0,y=0; int payout=0; bool active=true; int carType=0,angle=0,jclass=0,zone=0,jtype=0;
+    std::string desc;
+};
+struct SavedCargo { int payout=0,carType=0,jclass=0; };
+struct SavedTruck {
+    bool active=false; int model=0; float x=0,y=0; int facing=2;
+    std::vector<std::pair<int,int>> route; int ri=0,phase=0;
+    int carType=0,payout=0,jclass=0,jobType=0,kind=-1,slot=-1;
+};
+struct SavedRuntime {
+    std::vector<SavedJob> jobs;
+    std::vector<SavedCargo> carried;
+    std::vector<SavedTruck> autoTrucks,rivalTrucks;
+    int weather=0; float weatherTimer=30,spawnTimer=0,pulse=0;
+    bool announcedMajority=false;
+    double rivalAggression=0.6; int rivalMaxLots=40;
+    int positiveMonths=0; bool monthPositive=true; int pendingDistrict=0;
+};
 struct SaveGameData {
+    SavedRuntime runtime;
+    bool hasRuntime = true;
     int district = 1;
     int cash = 500;
     int tows = 0;
@@ -66,13 +89,15 @@ struct SaveGameData {
 
 inline bool validateSaveGame(const SaveGameData& data, int mapWidth, int mapHeight, int tileSize,
                              std::string& error) {
-    if (data.district < 1 || data.district > 8 || data.ownedTrucks.empty()
-        || data.ownedTrucks.size() > 64 || data.drivenSlot < 0
+    const int effectiveMapW = std::max(mapWidth, 256);
+    const int effectiveMapH = std::max(mapHeight, 192);
+    if (data.district < 1 || data.district > simulation::maxDistrict || data.ownedTrucks.empty()
+        || data.ownedTrucks.size() > simulation::maxTrucks || data.drivenSlot < 0
         || data.drivenSlot >= static_cast<int>(data.ownedTrucks.size())
         || tileSize <= 0 || !std::isfinite(data.truckX) || !std::isfinite(data.truckY)
-        || data.truckX < 0 || data.truckX >= mapWidth * tileSize
-        || data.truckY < 0 || data.truckY >= mapHeight * tileSize
-        || data.tows < 0 || data.goal < 0 || data.goal > 4 || data.drivers < 0 || data.drivers > 128
+        || data.truckX < 0 || data.truckX >= effectiveMapW * tileSize
+        || data.truckY < 0 || data.truckY >= effectiveMapH * tileSize
+        || data.tows < 0 || data.goal < 0 || data.goal > 4 || data.drivers < 0 || data.drivers > simulation::maxDrivers
         || data.facing < 0 || data.facing > 3
         || data.day < 1 || data.day > 7 || data.week < 1 || data.week > 4
         || data.month < 1 || data.month > 12 || data.year < 1
@@ -109,6 +134,40 @@ inline bool validateSaveGame(const SaveGameData& data, int mapWidth, int mapHeig
             return false;
         }
     }
+    const auto& r=data.runtime;
+    auto position=[&](float x,float y){return std::isfinite(x)&&std::isfinite(y)&&x>=0&&y>=0&&x<effectiveMapW*tileSize&&y<effectiveMapH*tileSize;};
+    auto payload=[](int pay,int car,int cls){return pay>=0&&pay<=1000000&&car>=0&&car<6&&cls>=0&&cls<3;};
+    if(r.jobs.size()>512 || r.carried.size()>2 || r.autoTrucks.size()>=data.ownedTrucks.size()
+       || r.autoTrucks.size()>static_cast<std::size_t>(data.drivers) || r.rivalTrucks.size()>3
+       || r.weather<0 || r.weather>2 || !std::isfinite(r.weatherTimer) || r.weatherTimer<0
+       || !std::isfinite(r.spawnTimer) || r.spawnTimer<0 || !std::isfinite(r.pulse) || r.pulse<0
+       || !std::isfinite(r.rivalAggression) || r.rivalAggression<0 || r.rivalAggression>1
+       || r.rivalMaxLots<0 || r.rivalMaxLots>10000 || r.positiveMonths<0 || r.positiveMonths>6 || r.pendingDistrict<0 || r.pendingDistrict>simulation::maxDistrict) {
+        error="invalid runtime state"; return false;
+    }
+    const int capacity=(data.ownedTrucks[data.drivenSlot]==1||data.ownedTrucks[data.drivenSlot]==2)?2:1;
+    if(r.carried.size()>static_cast<std::size_t>(capacity)){error="cargo exceeds truck capacity";return false;}
+    for(const auto& j:r.jobs) if(!position(j.x,j.y)||!payload(j.payout,j.carType,j.jclass)
+        ||j.angle<0||j.angle>270||j.angle%90!=0||j.zone<0||j.zone>2||j.jtype<0||j.jtype>3||j.desc.size()>512){error="invalid saved job";return false;}
+    for(const auto& c:r.carried) if(!payload(c.payout,c.carType,c.jclass)){error="invalid cargo";return false;}
+    std::vector<int> slots;
+    std::size_t totalRoute=0;
+    auto truckValid=[&](const SavedTruck& t,bool rival){
+        totalRoute+=t.route.size();
+        if(!t.active||t.model<0||t.model>5||!position(t.x,t.y)||t.facing<0||t.facing>3
+           ||t.phase<0||t.phase>2||t.ri<0||static_cast<std::size_t>(t.ri)>t.route.size()
+           ||!payload(t.payout,t.carType,t.jclass)||t.jobType<0||t.jobType>3||t.kind< -1||t.kind>3
+           ||t.route.size()>static_cast<std::size_t>(effectiveMapW)*static_cast<std::size_t>(effectiveMapH)||totalRoute>50000) return false;
+        if(!rival){
+            if(t.slot<0||t.slot>=static_cast<int>(data.ownedTrucks.size())||t.slot==data.drivenSlot
+               ||data.ownedTrucks[t.slot]!=t.model||std::find(slots.begin(),slots.end(),t.slot)!=slots.end())return false;
+            slots.push_back(t.slot);
+        }
+        for(auto [x,y]:t.route) if(x<0||y<0||x>=effectiveMapW||y>=effectiveMapH)return false;
+        return true;
+    };
+    for(const auto& t:r.autoTrucks) if(!truckValid(t,false)){error="invalid fleet assignment or route";return false;}
+    for(const auto& t:r.rivalTrucks) if(!truckValid(t,true)){error="invalid rival route";return false;}
     error.clear();
     return true;
 }
@@ -118,7 +177,7 @@ inline bool encodeSaveGame(const SaveGameData& data, int mapWidth, int mapHeight
     if (!validateSaveGame(data, mapWidth, mapHeight, tileSize, error)) return false;
     std::ostringstream out;
     out << std::setprecision(std::numeric_limits<double>::max_digits10)
-        << 6 << ' ' << data.district << ' ' << data.cash << ' ' << data.tows << ' '
+        << 7 << ' ' << data.district << ' ' << data.cash << ' ' << data.tows << ' '
         << data.goal << ' ' << data.drivers << ' ' << data.drivenSlot << ' '
         << (data.marketplaceUnlocked ? 1 : 0) << ' ' << data.truckX << ' ' << data.truckY << ' '
         << data.facing << ' ' << data.day << ' ' << data.week << ' ' << data.month << ' '
@@ -134,11 +193,30 @@ inline bool encodeSaveGame(const SaveGameData& data, int mapWidth, int mapHeight
         << ' ' << data.youOwnFraction << ' ' << data.rivalStake << ' ' << (data.wonDistrict ? 1 : 0)
         << ' ' << data.rivalKind << ' ' << data.difficulty << ' ' << (data.optHints ? 1 : 0)
         << ' ' << (data.optWeather ? 1 : 0) << ' ' << (data.optAutosave ? 1 : 0)
-        << ' ' << data.rngState << '\n';
+        << ' ' << data.rngState;
+    const auto& r=data.runtime;
+    out << ' ' << r.weather << ' ' << r.weatherTimer << ' ' << r.spawnTimer << ' ' << r.pulse
+        << ' ' << r.announcedMajority << ' ' << r.rivalAggression << ' ' << r.rivalMaxLots
+        << ' ' << r.positiveMonths << ' ' << r.monthPositive << ' ' << r.pendingDistrict << ' ' << r.jobs.size();
+    for(const auto& j:r.jobs) out << ' ' << j.x << ' ' << j.y << ' ' << j.payout << ' ' << j.active
+        << ' ' << j.carType << ' ' << j.angle << ' ' << j.jclass << ' ' << j.zone << ' ' << j.jtype << ' ' << std::quoted(j.desc);
+    out << ' ' << r.carried.size();
+    for(const auto& c:r.carried) out << ' ' << c.payout << ' ' << c.carType << ' ' << c.jclass;
+    auto writeTrucks=[&](const std::vector<SavedTruck>& trucks){
+        out << ' ' << trucks.size();
+        for(const auto& t:trucks){
+            out << ' ' << t.active << ' ' << t.model << ' ' << t.x << ' ' << t.y << ' ' << t.facing
+                << ' ' << t.ri << ' ' << t.phase << ' ' << t.carType << ' ' << t.payout << ' ' << t.jclass
+                << ' ' << t.jobType << ' ' << t.kind << ' ' << t.slot << ' ' << t.route.size();
+            for(auto [x,y]:t.route) out << ' ' << x << ' ' << y;
+        }
+    };
+    writeTrucks(r.autoTrucks); writeTrucks(r.rivalTrucks); out << '\n';
     if (!out) {
         error = "failed to serialize save data";
         return false;
     }
+    if(out.str().size()>1024*1024){error="save exceeds 1 MiB";return false;}
     contents = out.str();
     error.clear();
     return true;
@@ -148,7 +226,7 @@ inline bool decodeSaveGameCandidate(const std::string& contents, SaveGameData& c
                                     int mapWidth, int mapHeight, int tileSize, std::string& error) {
     std::istringstream in(contents);
     int version = 0;
-    if (!(in >> version) || version < 1 || version > 6) {
+    if (!(in >> version) || version < 1 || version > 7) {
         error = "unsupported or invalid save version";
         return false;
     }
@@ -157,7 +235,7 @@ inline bool decodeSaveGameCandidate(const std::string& contents, SaveGameData& c
         error = "save file is truncated at district";
         return false;
     }
-    if (candidate.district < 1 || candidate.district > 8) {
+    if (candidate.district < 1 || candidate.district > simulation::maxDistrict) {
         error = "district value is out of range";
         return false;
     }
@@ -211,6 +289,7 @@ inline bool decodeSaveGameCandidate(const std::string& contents, SaveGameData& c
             }
             savedLots.push_back(lot);
         }
+        candidate.lots=savedLots;
         candidate.decodedLots = std::move(savedLots);
     }
 
@@ -266,6 +345,34 @@ inline bool decodeSaveGameCandidate(const std::string& contents, SaveGameData& c
         }
     }
 
+    candidate.hasRuntime=version>=7;
+    candidate.runtime=SavedRuntime{};
+    if(version>=7){
+        auto& r=candidate.runtime;
+        auto invalid=[&](){error="truncated or invalid runtime state";return false;};
+        auto count=[&](int& n,int max){return static_cast<bool>(in>>n)&&n>=0&&n<=max;};
+        int n=0;
+        if(!(in>>r.weather>>r.weatherTimer>>r.spawnTimer>>r.pulse>>r.announcedMajority
+             >>r.rivalAggression>>r.rivalMaxLots>>r.positiveMonths>>r.monthPositive>>r.pendingDistrict)||!count(n,512)) return invalid();
+        for(int i=0;i<n;++i){SavedJob j;
+            if(!(in>>j.x>>j.y>>j.payout>>j.active>>j.carType>>j.angle>>j.jclass>>j.zone>>j.jtype>>std::quoted(j.desc)))return invalid();
+            r.jobs.push_back(std::move(j));
+        }
+        if(!count(n,2))return invalid();
+        for(int i=0;i<n;++i){SavedCargo c;if(!(in>>c.payout>>c.carType>>c.jclass))return invalid();r.carried.push_back(c);}
+        std::size_t totalRoute=0;
+        auto readTrucks=[&](std::vector<SavedTruck>& trucks,int max){
+            int size=0;if(!count(size,max))return false;
+            for(int i=0;i<size;++i){SavedTruck t;int routeCount=0;
+                if(!(in>>t.active>>t.model>>t.x>>t.y>>t.facing>>t.ri>>t.phase>>t.carType>>t.payout>>t.jclass
+                     >>t.jobType>>t.kind>>t.slot)||!count(routeCount,std::max(mapWidth,256)*std::max(mapHeight,192)))return false;
+                totalRoute+=routeCount;if(totalRoute>50000)return false;
+                for(int j=0;j<routeCount;++j){int x,y;if(!(in>>x>>y))return false;t.route.push_back({x,y});}
+                trucks.push_back(std::move(t));
+            }return true;
+        };
+        if(!readTrucks(r.autoTrucks,63)||!readTrucks(r.rivalTrucks,3))return invalid();
+    }
     std::string trailing;
     if (in >> trailing) {
         error = "save file contains unexpected trailing data";
@@ -293,3 +400,6 @@ inline bool decodeSaveGame(const std::string& contents, SaveGameData& candidate,
 }
 
 }
+
+
+
